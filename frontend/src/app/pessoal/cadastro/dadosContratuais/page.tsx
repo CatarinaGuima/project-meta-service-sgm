@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -24,6 +24,8 @@ import { StepIndicator } from "@/components/ui/step-indicator";
 import { PageLayout } from "@/components/ui/layout/PageLayout";
 import { FormActionsButton } from "@/components/ui/button/FormActionsButton";
 import { DatePicker } from "@/components/ui/date-picker";
+import { useRouter } from "next/navigation";
+import toast from "react-hot-toast";
 
 // Geração dinâmica de opções de horário
 const generateTimeOptions = (start: number, end: number) => {
@@ -90,7 +92,25 @@ const shifts = [
   { value: "integral", label: "Integral" },
 ];
 
-export default function EmployeeRegistration() {
+const supervisors = [
+  { value: "joao", label: "João da Silva" },
+  { value: "maria", label: "Maria Santos" },
+  { value: "carlos", label: "Carlos Oliveira" },
+];
+
+const hierarchyLevels = [
+  { value: "estagiario", label: "Estagiário" },
+  { value: "assistente", label: "Assistente" },
+  { value: "analista", label: "Analista" },
+  { value: "supervisor", label: "Supervisor" },
+  { value: "gerente", label: "Gerente" },
+  { value: "diretor", label: "Diretor" },
+];
+
+export default function ContractRegistration() {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const router = useRouter();
+
   const form = useForm<ContractFormData>({
     resolver: zodResolver(contractSchema),
     defaultValues: {
@@ -124,20 +144,125 @@ export default function EmployeeRegistration() {
     }
   }, [selectedShift, form]);
 
-  const onSubmit = ( data: ContractFormData) => {
-   
-    console.log("Dados contratuais:", data);
-    // Lógica para salvar os dados
-  };
-
   // Máscara para valores monetários
   const applyMoneyMask = (value: string) => {
-    return value
-      .replace(/\D/g, "")
-      .replace(/^0+/, "")
-      .replace(/(\d)(\d{2})$/, "$1,$2")
-      .replace(/(?=(\d{3})+(\D))\B/g, ".");
+    const onlyNumbers = value.replace(/\D/g, "");
+    
+    if (onlyNumbers === "") return "";
+    
+    // Adiciona zeros à esquerda se necessário
+    const padded = onlyNumbers.padStart(3, "0");
+    
+    // Formata como 0,00
+    const integerPart = padded.slice(0, -2) || "0";
+    const decimalPart = padded.slice(-2);
+    
+    return `${integerPart},${decimalPart}`;
   };
+
+  // Função para salvar rascunho
+  const onSaveDraft = async () => {
+    const formData = form.getValues();
+    try {
+      localStorage.setItem("contract-draft", JSON.stringify({
+        ...formData,
+        admissionDate: formData.admissionDate.toISOString(),
+        contractDate: formData.contractDate.toISOString(),
+        contractExpiration: formData.contractExpiration.toISOString(),
+      }));
+      
+      toast.success("Rascunho salvo com sucesso!");
+    } catch (error) {
+      console.error("Erro ao salvar rascunho:", error);
+      toast.error("Erro ao salvar rascunho");
+    }
+  };
+
+  // Função de submit
+  const onSubmit = async (data: ContractFormData) => {
+    setIsSubmitting(true);
+    try {
+      console.log("Dados contratuais enviados:", data);
+
+      // Aqui você pode adicionar a lógica de API
+      // await api.post('/employees/contract', data);
+
+      // Salva os dados antes de navegar
+      localStorage.setItem("contract-data", JSON.stringify({
+        ...data,
+        admissionDate: data.admissionDate.toISOString(),
+        contractDate: data.contractDate.toISOString(),
+        contractExpiration: data.contractExpiration.toISOString(),
+      }));
+
+      // Navega para a próxima página
+      router.push("/pessoal/cadastro/documentos");
+    } catch (error) {
+      console.error("Erro ao enviar dados:", error);
+      toast.error("Erro ao enviar dados");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Função para próximo (com validação)
+  const handleNextPage = () => {
+    form.trigger().then((isValid) => {
+      if (isValid) {
+        // Se válido, submete o formulário
+        form.handleSubmit(onSubmit)();
+      } else {
+        console.log("Formulário contém erros. Corrija antes de prosseguir.");
+        toast.error("Por favor, corrija os erros antes de prosseguir.");
+
+        // Scroll para o primeiro erro
+        const firstError = Object.keys(form.formState.errors)[0];
+        if (firstError) {
+          const element = document.querySelector(`[name="${firstError}"]`);
+          element?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }
+    });
+  };
+
+  // Função para anterior (sem validação)
+  const handlePreviousPage = () => {
+    // Salva o rascunho antes de navegar
+    onSaveDraft();
+    router.push("/pessoal/cadastro/contatos"); // Volta para página anterior
+  };
+
+  // Função para cancelar
+  const handleCancel = () => {
+    if (confirm("Tem certeza que deseja limpar todos os dados?")) {
+      form.reset();
+      localStorage.removeItem("contract-draft");
+      toast.success("Dados limpos com sucesso!");
+    }
+  };
+
+  // Carregar rascunho salvo
+  useEffect(() => {
+    const loadDraft = () => {
+      try {
+        const draft = localStorage.getItem("contract-draft");
+        if (draft) {
+          const parsedDraft = JSON.parse(draft);
+          form.reset({
+            ...parsedDraft,
+            admissionDate: new Date(parsedDraft.admissionDate),
+            contractDate: new Date(parsedDraft.contractDate),
+            contractExpiration: new Date(parsedDraft.contractExpiration),
+          });
+          console.log("Rascunho carregado");
+        }
+      } catch (error) {
+        console.error("Erro ao carregar rascunho:", error);
+      }
+    };
+
+    loadDraft();
+  }, [form]);
 
   return (
     <PageLayout>
@@ -158,11 +283,9 @@ export default function EmployeeRegistration() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Departamento *</FormLabel>
-                    <div className="flex gap-2">
-                      <FormControl>
-                        <Input placeholder="Ex: Financeiro" {...field} />
-                      </FormControl>             
-                    </div>
+                    <FormControl>
+                      <Input placeholder="Ex: Financeiro" {...field} />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -174,25 +297,23 @@ export default function EmployeeRegistration() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Cargo *</FormLabel>
-                    <div className="flex gap-2">
-                      <FormControl>
-                        <Select
-                          value={field.value}
-                          onValueChange={field.onChange}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {positions.map((item) => (
-                              <SelectItem key={item.value} value={item.value}>
-                                {item.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </FormControl>
-                    </div>
+                    <FormControl>
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {positions.map((item) => (
+                            <SelectItem key={item.value} value={item.value}>
+                              {item.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -207,25 +328,23 @@ export default function EmployeeRegistration() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Tipo de Contrato *</FormLabel>
-                    <div className="flex gap-2">
-                      <FormControl>
-                        <Select
-                          value={field.value}
-                          onValueChange={field.onChange}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {contractTypes.map((item) => (
-                              <SelectItem key={item.value} value={item.value}>
-                                {item.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </FormControl>              
-                    </div>
+                    <FormControl>
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {contractTypes.map((item) => (
+                            <SelectItem key={item.value} value={item.value}>
+                              {item.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -237,11 +356,9 @@ export default function EmployeeRegistration() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Unidade *</FormLabel>
-                    <div className="flex gap-2">
-                      <FormControl>
-                        <Input placeholder="Ex: Matriz Recife" {...field} />
-                      </FormControl>         
-                    </div>
+                    <FormControl>
+                      <Input placeholder="Ex: Matriz Recife" {...field} />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -384,7 +501,7 @@ export default function EmployeeRegistration() {
                     <FormControl>
                       <Input
                         placeholder="R$ 00,00"
-                        {...field}
+                        value={field.value}
                         onChange={(e) => {
                           const maskedValue = applyMoneyMask(e.target.value);
                           field.onChange(maskedValue);
@@ -404,7 +521,7 @@ export default function EmployeeRegistration() {
                     <FormLabel>Data de Admissão *</FormLabel>
                     <FormControl>
                       <DatePicker
-                        value={field.value || null}
+                        value={field.value}
                         onChange={field.onChange}
                       />
                     </FormControl>
@@ -437,7 +554,21 @@ export default function EmployeeRegistration() {
                   <FormItem>
                     <FormLabel>Superior Direto *</FormLabel>
                     <FormControl>
-                      <Input placeholder="Ex: João da Silva" {...field} />
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {supervisors.map((item) => (
+                            <SelectItem key={item.value} value={item.value}>
+                              {item.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -450,11 +581,23 @@ export default function EmployeeRegistration() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Grau Hierárquico *</FormLabel>
-                    <div className="flex gap-2">
-                      <FormControl>
-                      <Input placeholder="Ex: Supervisor" {...field} />
-                      </FormControl>              
-                    </div>
+                    <FormControl>
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {hierarchyLevels.map((item) => (
+                            <SelectItem key={item.value} value={item.value}>
+                              {item.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -529,7 +672,17 @@ export default function EmployeeRegistration() {
               />
             </div>
           </fieldset>
-          <FormActionsButton />
+
+          <FormActionsButton
+            onCancel={handleCancel}
+            disabled={isSubmitting}
+            onPrevious={handlePreviousPage}
+            onNext={handleNextPage}
+            previousLabel="Voltar"
+            nextLabel={isSubmitting ? "Enviando..." : "Próximo"}
+            cancelLabel="Limpar"
+            onSaveDraft={onSaveDraft}
+          />
         </form>
       </Form>
     </PageLayout>

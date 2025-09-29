@@ -20,71 +20,84 @@ import { TbPhotoUp } from "react-icons/tb";
 import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { PlusIcon, TrashIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
+import toast from "react-hot-toast";
+import { ConfirmDialog } from "@/components/ui/confirmDialog";
 
+// Schema corrigido para aceitar File ou undefined
 const formSchema = z.object({
   certificados: z.array(
     z.object({
       nome: z.string().min(1, "O nome do certificado é obrigatório"),
-      dataEmissao: z.date(),
-      dataValidade: z.date(),
-      documento: z.instanceof(File).optional(),
+      dataEmissao: z.date({
+        required_error: "Data de emissão é obrigatória",
+      }),
+      dataValidade: z.date({
+        required_error: "Data de validade é obrigatória",
+      }),
+      documento: z.any().optional(),
     })
-  ).min(1, "Pelo menos um certificado é obrigatório"),
+  ),
   aso: z.object({
     nomeASO: z.string().min(1, "O nome é obrigatório"),
-    dataEmissao: z.date(),
-    dataValidade: z.date(),
-    documento: z.instanceof(File).optional(),
+    dataEmissao: z.date({
+      required_error: "Data de emissão é obrigatória",
+    }),
+    dataValidade: z.date({
+      required_error: "Data de validade é obrigatória",
+    }),
+    documento: z.any().optional(),
   }),
   medidas: z.object({
-    camisa: z.string(),
-    calca: z.string(),
-    calcado: z.string(),
-    peso: z.string(),
-    altura: z.string(),
+    camisa: z.string().optional(),
+    calca: z.string().optional(),
+    calcado: z.string().optional(),
+    peso: z.string().optional(),
+    altura: z.string().optional(),
   }),
 });
 
 type FormData = z.infer<typeof formSchema>;
 
+// Valores padrão
+const defaultValues: FormData = {
+  certificados: [{
+    nome: "",
+    dataEmissao: new Date(),
+    dataValidade: new Date(),
+    documento: undefined,
+  }],
+  aso: {
+    nomeASO: "",
+    dataEmissao: new Date(),
+    dataValidade: new Date(),
+    documento: undefined,
+  },
+  medidas: {
+    camisa: "",
+    calca: "",
+    calcado: "",
+    peso: "",
+    altura: "",
+  },
+};
+
 export default function PersonalInfoStep() {
   const [diasASO, setDiasASO] = useState<number | null>(null);
   const [diasCertificados, setDiasCertificados] = useState<(number | null)[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const router = useRouter();
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
-    defaultValues: {
-      certificados: [{
-        nome: "",
-        dataEmissao: new Date(),
-        dataValidade: new Date(),
-        documento: undefined,
-      }],
-      aso: {
-        nomeASO: "",
-        dataEmissao: new Date(),
-        dataValidade: new Date(),
-        documento: undefined,
-      },
-      medidas: {
-        camisa: "",
-        calca: "",
-        calcado: "",
-        peso: "",
-        altura: "",
-      },
-    },
+    defaultValues,
   });
 
   const { fields: certificadosFields, append: appendCertificado, remove: removeCertificado } = useFieldArray({
     control: form.control,
     name: "certificados",
   });
-
-  const onSubmit = (data: FormData) => {
-    console.log("Dados pessoais:", data);
-    // Lógica para salvar os dados
-  };
 
   const calcularDiasRestantes = useCallback((dataValidade: Date | undefined) => {
     if (!dataValidade) return null;
@@ -112,17 +125,216 @@ export default function PersonalInfoStep() {
   }, [form, calcularDiasRestantes]);
 
   // Calcula dias restantes para todos os certificados
-useEffect(() => {
-  const subscription = form.watch((value, { name }) => {
-    if (name?.startsWith("certificados")) {
-      const dias = value.certificados?.map(certificado => 
-        calcularDiasRestantes(certificado?.dataValidade)
-      ) || [];
-      setDiasCertificados(dias);
+  useEffect(() => {
+    const subscription = form.watch((value, { name }) => {
+      if (name?.startsWith("certificados")) {
+        const dias = value.certificados?.map(certificado => 
+          calcularDiasRestantes(certificado?.dataValidade)
+        ) || [];
+        setDiasCertificados(dias);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [form, calcularDiasRestantes]);
+
+  // Função para salvar rascunho
+  const onSaveDraft = async () => {
+    const formData = form.getValues();
+    try {
+      const serializableData = {
+        ...formData,
+        certificados: formData.certificados.map(cert => ({
+          ...cert,
+          dataEmissao: cert.dataEmissao.toISOString(),
+          dataValidade: cert.dataValidade.toISOString(),
+          documento: cert.documento instanceof File ? cert.documento.name : cert.documento
+        })),
+        aso: {
+          ...formData.aso,
+          dataEmissao: formData.aso.dataEmissao.toISOString(),
+          dataValidade: formData.aso.dataValidade.toISOString(),
+          documento: formData.aso.documento instanceof File ? formData.aso.documento.name : formData.aso.documento
+        }
+      };
+      
+      localStorage.setItem("personal-info-draft", JSON.stringify(serializableData));
+      toast.success("Rascunho salvo com sucesso!");
+    } catch (error) {
+      console.error("Erro ao salvar rascunho:", error);
+      toast.error("Erro ao salvar rascunho");
     }
-  });
-  return () => subscription.unsubscribe();
-}, [form, calcularDiasRestantes]);
+  };
+
+  // Função para coletar todos os dados das páginas anteriores
+  const coletarTodosOsDados = () => {
+    try {
+      // Coletar dados de todas as páginas anteriores
+      const dadosPessoais = localStorage.getItem("personal-data");
+      const dadosContato = localStorage.getItem("contact-data"); 
+      const dadosContratuais = localStorage.getItem("contract-data");
+      const documentos = localStorage.getItem("documents-data");
+      const dependentes = localStorage.getItem("dependents-data");
+      const informacoesPessoais = form.getValues();
+
+      return {
+        dadosPessoais: dadosPessoais ? JSON.parse(dadosPessoais) : null,
+        dadosContato: dadosContato ? JSON.parse(dadosContato) : null,
+        dadosContratuais: dadosContratuais ? JSON.parse(dadosContratuais) : null,
+        documentos: documentos ? JSON.parse(documentos) : null,
+        dependentes: dependentes ? JSON.parse(dependentes) : null,
+        informacoesPessoais: {
+          ...informacoesPessoais,
+          certificados: informacoesPessoais.certificados.map(cert => ({
+            ...cert,
+            dataEmissao: cert.dataEmissao.toISOString(),
+            dataValidade: cert.dataValidade.toISOString(),
+            documento: cert.documento instanceof File ? cert.documento.name : cert.documento
+          })),
+          aso: {
+            ...informacoesPessoais.aso,
+            dataEmissao: informacoesPessoais.aso.dataEmissao.toISOString(),
+            dataValidade: informacoesPessoais.aso.dataValidade.toISOString(),
+            documento: informacoesPessoais.aso.documento instanceof File ? informacoesPessoais.aso.documento.name : informacoesPessoais.aso.documento
+          }
+        }
+      };
+    } catch (error) {
+      console.error("Erro ao coletar dados:", error);
+      return null;
+    }
+  };
+
+  // Função de submit FINAL - envia todos os dados
+  const onSubmit = async () => {
+    setIsSubmitting(true);
+    try {
+      console.log("Enviando todos os dados do formulário...");
+
+      // Coletar todos os dados
+      const todosOsDados = coletarTodosOsDados();
+      
+      if (!todosOsDados) {
+        throw new Error("Erro ao coletar dados das páginas anteriores");
+      }
+
+      console.log("Dados completos para envio:", todosOsDados);
+
+      // AQUI VOCÊ FAZ O ENVIO PARA A API
+      // Exemplo:
+      // const response = await fetch('/api/employees', {
+      //   method: 'POST',
+      //   headers: {
+      //     'Content-Type': 'application/json',
+      //   },
+      //   body: JSON.stringify(todosOsDados),
+      // });
+
+      // if (!response.ok) {
+      //   throw new Error('Erro ao enviar dados');
+      // }
+
+      // Simulando o envio (remova isso quando implementar a API)
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Limpar todos os dados do localStorage após envio bem-sucedido
+      localStorage.removeItem("personal-data");
+      localStorage.removeItem("contact-data");
+      localStorage.removeItem("contract-data");
+      localStorage.removeItem("documents-data");
+      localStorage.removeItem("dependents-data");
+      localStorage.removeItem("personal-info-draft");
+
+      toast.success("Cadastro realizado com sucesso!");
+      
+      // Redirecionar para página de confirmação ou dashboard
+      router.push("/bemVindo");
+
+    } catch (error) {
+      console.error("Erro ao enviar dados:", error);
+      toast.error("Erro ao enviar dados. Tente novamente.");
+    } finally {
+      setIsSubmitting(false);
+      setIsDialogOpen(false);
+    }
+  };
+
+  // Função para abrir o diálogo de confirmação
+  const handleSubmitDialog = () => {
+    setIsDialogOpen(true);
+  };
+
+  // Função para próximo (envio final)
+  const handleNextPage = () => {
+    form.trigger().then((isValid) => {
+      if (isValid) {
+        handleSubmitDialog();
+      } else {
+        console.log("Formulário contém erros. Corrija antes de enviar.");
+        toast.error("Por favor, corrija os erros antes de enviar.");
+
+        // Scroll para o primeiro erro
+        const firstError = Object.keys(form.formState.errors)[0];
+        if (firstError) {
+          const element = document.querySelector(`[name="${firstError}"]`);
+          element?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }
+    });
+  };
+
+  // Função para anterior
+  const handlePreviousPage = () => {
+    onSaveDraft();
+    router.push("/pessoal/cadastro/dependentes");
+  };
+
+  // Função para cancelar
+  const handleCancel = () => {
+    if (confirm("Tem certeza que deseja cancelar o cadastro? Todos os dados serão perdidos.")) {
+      // Limpar todos os dados
+      form.reset(defaultValues);
+      localStorage.removeItem("personal-data");
+      localStorage.removeItem("contact-data");
+      localStorage.removeItem("contract-data");
+      localStorage.removeItem("documents-data");
+      localStorage.removeItem("dependents-data");
+      localStorage.removeItem("personal-info-draft");
+      
+      toast.success("Cadastro cancelado e dados limpos!");
+      router.push("/pessoal");
+    }
+  };
+
+  // Carregar rascunho salvo
+  useEffect(() => {
+    const loadDraft = () => {
+      try {
+        const draft = localStorage.getItem("personal-info-draft");
+        if (draft) {
+          const parsedDraft = JSON.parse(draft);
+          const draftWithDates = {
+            ...parsedDraft,
+            certificados: parsedDraft.certificados.map((cert: FormData["certificados"][number]) => ({
+              ...cert,
+              dataEmissao: new Date(cert.dataEmissao),
+              dataValidade: new Date(cert.dataValidade)
+            })),
+            aso: {
+              ...parsedDraft.aso,
+              dataEmissao: new Date(parsedDraft.aso.dataEmissao),
+              dataValidade: new Date(parsedDraft.aso.dataValidade)
+            }
+          };
+          form.reset(draftWithDates);
+          console.log("Rascunho de informações pessoais carregado");
+        }
+      } catch (error) {
+        console.error("Erro ao carregar rascunho:", error);
+      }
+    };
+
+    loadDraft();
+  }, [form]);
 
   return (
     <PageLayout>
@@ -131,9 +343,14 @@ useEffect(() => {
           <StepIndicator activeStep={7} />
 
           <div className="bg-white p-6 rounded-lg shadow-sm space-y-8">
-            <h2 className="text-xl font-semibold mb-6 text-gray-800">
-              Informações Pessoais
-            </h2>
+            <div className="text-center mb-6">
+              <h2 className="text-xl font-semibold text-gray-800">
+                Informações Pessoais
+              </h2>
+              <p className="text-sm text-gray-500 mt-2">
+                Última etapa - Revise e envie seus dados
+              </p>
+            </div>
 
             {/* Certificados */}
             <div className="space-y-4">
@@ -143,7 +360,7 @@ useEffect(() => {
                 <div key={field.id} className="border rounded-lg p-4 mb-4">
                   <div className="flex justify-between items-center mb-4">
                     <h4 className="font-medium">Certificado {index + 1}</h4>
-                    {index > 0 && (
+                    {certificadosFields.length > 1 && (
                       <Button
                         type="button"
                         variant="ghost"
@@ -208,9 +425,9 @@ useEffect(() => {
                     <FormItem>
                       <FormLabel>Expira em Dias</FormLabel>
                       <div className="h-10 flex items-center border rounded-md px-3 bg-muted">
-                        {diasCertificados[index] !== undefined
+                        {diasCertificados[index] !== undefined && diasCertificados[index] !== null
                           ? `${diasCertificados[index]} Dias`
-                          : "Calculando..."}
+                          : "---"}
                       </div>
                     </FormItem>
                   </div>
@@ -232,9 +449,14 @@ useEffect(() => {
                             onChange={(e) => field.onChange(e.target.files?.[0])}
                             className="bg-background pl-10 pr-4 file:bg-[#2B426E] file:text-white file:px-4 file:py-1 file:rounded-md file:border-none hover:file:bg-[#1f2f4f] file:cursor-pointer"
                           />
-                          {field.value?.name && (
+                          {field.value instanceof File && (
                             <p className="text-sm text-muted-foreground mt-1">
                               Selecionado: {field.value.name}
+                            </p>
+                          )}
+                          {typeof field.value === 'string' && field.value && (
+                            <p className="text-sm text-muted-foreground mt-1">
+                              Arquivo salvo: {field.value}
                             </p>
                           )}
                         </div>
@@ -317,7 +539,7 @@ useEffect(() => {
                 <FormItem>
                   <FormLabel>Expira em Dias</FormLabel>
                   <div className="h-10 flex items-center border rounded-md px-3 bg-muted">
-                    {diasASO !== null ? `${diasASO} Dias` : "Calculando..."}
+                    {diasASO !== null ? `${diasASO} Dias` : "---"}
                   </div>
                 </FormItem>
               </div>
@@ -339,9 +561,14 @@ useEffect(() => {
                         onChange={(e) => field.onChange(e.target.files?.[0])}
                         className="bg-background pl-10 pr-4 file:bg-[#2B426E] file:text-white file:px-4 file:py-1 file:rounded-md file:border-none hover:file:bg-[#1f2f4f] file:cursor-pointer"
                       />
-                      {field.value?.name && (
+                      {field.value instanceof File && (
                         <p className="text-sm text-muted-foreground mt-1">
                           Selecionado: {field.value.name}
+                        </p>
+                      )}
+                      {typeof field.value === 'string' && field.value && (
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Arquivo salvo: {field.value}
                         </p>
                       )}
                     </div>
@@ -362,7 +589,7 @@ useEffect(() => {
                     <FormItem>
                       <FormLabel>Camisa</FormLabel>
                       <FormControl>
-                        <Input placeholder="Ex: M" {...field} />
+                        <Input placeholder="Ex: M" {...field} value={field.value || ""} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -375,7 +602,7 @@ useEffect(() => {
                     <FormItem>
                       <FormLabel>Calça</FormLabel>
                       <FormControl>
-                        <Input placeholder="Ex: 38" {...field} />
+                        <Input placeholder="Ex: 38" {...field} value={field.value || ""} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -388,7 +615,7 @@ useEffect(() => {
                     <FormItem>
                       <FormLabel>Calçado</FormLabel>
                       <FormControl>
-                        <Input placeholder="Ex: 41" {...field} />
+                        <Input placeholder="Ex: 41" {...field} value={field.value || ""} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -401,7 +628,7 @@ useEffect(() => {
                     <FormItem>
                       <FormLabel>Peso</FormLabel>
                       <FormControl>
-                        <Input placeholder="Ex: 80kg" {...field} />
+                        <Input placeholder="Ex: 80kg" {...field} value={field.value || ""} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -414,7 +641,7 @@ useEffect(() => {
                     <FormItem>
                       <FormLabel>Altura</FormLabel>
                       <FormControl>
-                        <Input placeholder="Ex: 1.72m" {...field} />
+                        <Input placeholder="Ex: 1.72m" {...field} value={field.value || ""} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -424,7 +651,27 @@ useEffect(() => {
             </div>
           </div>
 
-          <FormActionsButton />
+          <FormActionsButton
+            onCancel={handleCancel}
+            disabled={isSubmitting}
+            onPrevious={handlePreviousPage}
+            onNext={handleNextPage}
+            previousLabel="Voltar"
+            nextLabel={isSubmitting ? "Enviando..." : "Finalizar"}
+            cancelLabel="Cancelar"
+            onSaveDraft={onSaveDraft}
+          />
+
+          <ConfirmDialog
+            isOpen={isDialogOpen}
+            onConfirm={onSubmit}
+            onCancel={() => setIsDialogOpen(false)}
+            onClose={() => setIsDialogOpen(false)}
+            confirmButtonLabel="Confirmar"
+            title="Confirmação de Envio"
+            message="Tem certeza de que deseja enviar o formulário? Após o envio, não será possível alterar as respostas."
+            icon={<TbPhotoUp className="h-6 w-6 text-[#2B426E]" />}
+          />
         </form>
       </Form>
     </PageLayout>

@@ -14,7 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Button } from "@/components/ui/button";
-import { PlusIcon } from "lucide-react";
+import { PlusIcon, Trash2Icon } from "lucide-react";
 import { StepIndicator } from "@/components/ui/step-indicator";
 import { PageLayout } from "@/components/ui/layout/PageLayout";
 import {
@@ -26,6 +26,9 @@ import {
 } from "@/components/ui/select";
 import { FormActionsButton } from "@/components/ui/button/FormActionsButton";
 import { TbPhotoUp } from "react-icons/tb";
+import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import toast from "react-hot-toast";
 
 const relationshipOptions = [
   { value: "filho", label: "Filho(a)" },
@@ -34,13 +37,14 @@ const relationshipOptions = [
   { value: "outro", label: "Outro" },
 ];
 
+// Schema com todos os campos opcionais
 const formSchema = z.object({
   dependents: z.array(
     z.object({
-      nome: z.string().min(3, "Nome é obrigatório"),
-      parentesco: z.string().min(1, "Parentesco é obrigatório"),
-      dataNascimento: z.date(),
-      documento: z.instanceof(File).optional(),
+      nome: z.string().optional(),
+      parentesco: z.string().optional(),
+      dataNascimento: z.date().optional(),
+      documento: z.any().optional(),
       idade: z.number().optional(),
     })
   ),
@@ -48,20 +52,18 @@ const formSchema = z.object({
 
 type FormData = z.infer<typeof formSchema>;
 
+// Valores padrão - array vazio, sem dependentes
+const defaultValues: FormData = {
+  dependents: [],
+};
+
 export default function DependentsPage() {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const router = useRouter();
+
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
-    defaultValues: {
-      dependents: [
-        {
-          nome: "",
-          parentesco: "",
-          dataNascimento: new Date(),
-          documento: undefined,
-          idade: 0,
-        },
-      ],
-    },
+    defaultValues,
   });
 
   const { fields, append, remove } = useFieldArray({
@@ -69,12 +71,9 @@ export default function DependentsPage() {
     name: "dependents",
   });
 
-  const onSubmit = (data: FormData) => {
-    console.log("Dados dos dependentes:", data);
-    // Lógica para salvar os dados
-  };
-
   const calculateAge = (birthDate: Date) => {
+    if (!birthDate) return 0;
+    
     const today = new Date();
     let age = today.getFullYear() - birthDate.getFullYear();
     const monthDiff = today.getMonth() - birthDate.getMonth();
@@ -89,6 +88,118 @@ export default function DependentsPage() {
     return age;
   };
 
+  // Função para salvar rascunho
+  const onSaveDraft = async () => {
+    const formData = form.getValues();
+    try {
+      const serializableData = {
+        ...formData,
+        dependents: formData.dependents.map(dep => ({
+          ...dep,
+          dataNascimento: dep.dataNascimento ? dep.dataNascimento.toISOString() : null,
+          documento: dep.documento instanceof File ? dep.documento.name : dep.documento
+        }))
+      };
+      
+      localStorage.setItem("dependents-draft", JSON.stringify(serializableData));
+      toast.success("Rascunho salvo com sucesso!");
+    } catch (error) {
+      console.error("Erro ao salvar rascunho:", error);
+      toast.error("Erro ao salvar rascunho");
+    }
+  };
+
+  // Função de submit - aceita array vazio
+  const onSubmit = async (data: FormData) => {
+    setIsSubmitting(true);
+    try {
+      console.log("Dados de dependentes enviados:", data);
+
+      // Filtrar dependentes vazios (opcional)
+      const filteredDependents = data.dependents.filter(dep => 
+        dep.nome || dep.parentesco || dep.dataNascimento
+      );
+
+      // Aqui você pode adicionar a lógica de API
+      // await api.post('/employees/dependents', { dependents: filteredDependents });
+
+      // Salva os dados antes de navegar
+      localStorage.setItem("dependents-data", JSON.stringify({
+        dependents: filteredDependents.map(dep => ({
+          ...dep,
+          dataNascimento: dep.dataNascimento ? dep.dataNascimento.toISOString() : null,
+          documento: dep.documento instanceof File ? dep.documento.name : dep.documento
+        }))
+      }));
+
+      // Navega para a próxima página
+      router.push("/pessoal/cadastro/informacoesPessoais");
+    } catch (error) {
+      console.error("Erro ao enviar dados:", error);
+      toast.error("Erro ao enviar dados");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Função para próximo (com validação)
+  const handleNextPage = () => {
+    // Pode prosseguir mesmo sem dependentes
+    form.handleSubmit(onSubmit)();
+  };
+
+  // Função para anterior
+  const handlePreviousPage = () => {
+    onSaveDraft();
+    router.push("/pessoal/cadastro/documentos");
+  };
+
+  // Função para cancelar
+  const handleCancel = () => {
+    if (confirm("Tem certeza que deseja limpar todos os dados?")) {
+      form.reset(defaultValues);
+      localStorage.removeItem("dependents-draft");
+      toast.success("Dados limpos com sucesso!");
+    }
+  };
+
+  // Carregar rascunho salvo
+  useEffect(() => {
+    const loadDraft = () => {
+      try {
+        const draft = localStorage.getItem("dependents-draft");
+        if (draft) {
+          const parsedDraft = JSON.parse(draft);
+          const draftWithDates = {
+            ...parsedDraft,
+            dependents: parsedDraft.dependents.map((dep: FormData['dependents'][number]) => ({
+              ...dep,
+              dataNascimento: dep.dataNascimento ? new Date(dep.dataNascimento) : undefined,
+              idade: dep.idade || (dep.dataNascimento ? calculateAge(new Date(dep.dataNascimento)) : 0)
+            }))
+          };
+          form.reset(draftWithDates);
+          console.log("Rascunho de dependentes carregado");
+        }
+      } catch (error) {
+        console.error("Erro ao carregar rascunho:", error);
+      }
+    };
+
+    loadDraft();
+  }, [form]);
+
+  // Adicionar um dependente vazio
+  const addEmptyDependent = () => {
+    append({
+      nome: "",
+      parentesco: "",
+      dataNascimento: undefined,
+      documento: undefined,
+      idade: 0,
+    });
+  };
+
   return (
     <PageLayout>
       <Form {...form}>
@@ -96,18 +207,50 @@ export default function DependentsPage() {
           <StepIndicator activeStep={6} />
 
           <div className="bg-white p-6 rounded-lg shadow-sm">
-            <h2 className="text-xl font-semibold mb-6 text-gray-800">
-              Dependentes
-            </h2>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-semibold text-gray-800">
+                Dependentes
+              </h2>
+              <p className="text-sm text-gray-500">
+                {fields.length === 0 ? "Nenhum dependente adicionado" : `${fields.length} dependente(s)`}
+              </p>
+            </div>
+
+            {fields.length === 0 && (
+              <div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-lg mb-6">
+                <p className="text-gray-500 mb-4">Nenhum dependente cadastrado</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size={"lg"}
+                  onClick={addEmptyDependent}
+                >
+                  <PlusIcon className="mr-2 h-4 w-4" />
+                  Adicionar Dependente
+                </Button>
+              </div>
+            )}
 
             {fields.map((field, index) => (
               <div
                 key={field.id}
-                className="mb-8 border-b pb-6 last:border-b-0"
+                className="mb-8 border border-gray-200 rounded-lg p-6 relative"
               >
-                <h3 className="text-lg font-medium mb-4 text-gray-700">
-                  Dependente {index + 1}
-                </h3>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-medium text-gray-700">
+                    Dependente {index + 1}
+                  </h3>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-red-500 hover:text-red-600 hover:bg-red-50"
+                    onClick={() => remove(index)}
+                  >
+                    <Trash2Icon className="h-4 w-4 mr-1" />
+                    Remover
+                  </Button>
+                </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
                   <FormField
@@ -115,9 +258,13 @@ export default function DependentsPage() {
                     name={`dependents.${index}.nome`}
                     render={({ field: formField }) => (
                       <FormItem>
-                        <FormLabel className="text-gray-700">Nome*</FormLabel>
+                        <FormLabel className="text-gray-700">Nome</FormLabel>
                         <FormControl>
-                          <Input placeholder="Nome completo" {...formField} />
+                          <Input 
+                            placeholder="Nome completo (opcional)" 
+                            {...formField} 
+                            value={formField.value || ""}
+                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -130,7 +277,7 @@ export default function DependentsPage() {
                     render={({ field: formField }) => (
                       <FormItem>
                         <FormLabel className="text-gray-700">
-                          Parentesco*
+                          Parentesco
                         </FormLabel>
                         <Select
                           onValueChange={formField.onChange}
@@ -138,7 +285,7 @@ export default function DependentsPage() {
                         >
                           <FormControl>
                             <SelectTrigger>
-                              <SelectValue placeholder="Selecione" />
+                              <SelectValue placeholder="Selecione (opcional)" />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
@@ -162,17 +309,20 @@ export default function DependentsPage() {
                     render={({ field: formField }) => (
                       <FormItem>
                         <FormLabel className="text-gray-700">
-                          Data de Nascimento*
+                          Data de Nascimento
                         </FormLabel>
                         <FormControl>
                           <DatePicker
-                            value={formField.value}
+                            value={formField.value || undefined}
                             onChange={(date) => {
                               formField.onChange(date);
-                              form.setValue(
-                                `dependents.${index}.idade`,
-                                calculateAge(date)
-                              );
+                              if (date) {
+                                const age = calculateAge(date);
+                                form.setValue(
+                                  `dependents.${index}.idade`,
+                                  age
+                                );
+                              }
                             }}
                           />
                         </FormControl>
@@ -184,11 +334,23 @@ export default function DependentsPage() {
                   <div className="flex items-end">
                     <FormItem>
                       <FormLabel className="text-gray-700">Idade</FormLabel>
-                      <div className="h-10 flex items-center">
-                        {form.watch(`dependents.${index}.dataNascimento`) &&
-                          calculateAge(
-                            form.watch(`dependents.${index}.dataNascimento`)
-                          ) + " anos"}
+                      <div className="h-10 flex items-center text-gray-600">
+                        {(() => {
+                          const value = form.watch(`dependents.${index}.dataNascimento`);
+                          let dateValue: Date | undefined;
+                          if (value instanceof Date) {
+                            dateValue = value;
+                          } else if (typeof value === "string" && value) {
+                            // Try to parse string to Date
+                            const parsed = new Date(value);
+                            dateValue = isNaN(parsed.getTime()) ? undefined : parsed;
+                          } else {
+                            dateValue = undefined;
+                          }
+                          return dateValue
+                            ? calculateAge(dateValue) + " anos"
+                            : "---";
+                        })()}
                       </div>
                     </FormItem>
                   </div>
@@ -201,7 +363,7 @@ export default function DependentsPage() {
                     render={({ field: formField }) => (
                       <FormItem>
                         <FormLabel className="text-gray-700">
-                          Documento de Identificação
+                          Documento de Identificação (opcional)
                         </FormLabel>
                         <div className="relative w-full">
                           <TbPhotoUp
@@ -210,16 +372,21 @@ export default function DependentsPage() {
                           />
                           <Input
                             type="file"
-                            accept="image/*"
+                            accept="image/*,.pdf"
                             onChange={(e) => {
                               const file = e.target.files?.[0];
                               formField.onChange(file);
                             }}
                             className="bg-background pl-10 pr-4 file:bg-[#2B426E] file:text-white file:px-4 file:py-1 file:rounded-md file:border-none hover:file:bg-[#1f2f4f] file:cursor-pointer"
                           />
-                          {formField.value?.name && (
+                          {formField.value instanceof File && (
                             <p className="text-sm text-muted-foreground mt-1">
                               Selecionado: {formField.value.name}
+                            </p>
+                          )}
+                          {typeof formField.value === 'string' && formField.value && (
+                            <p className="text-sm text-muted-foreground mt-1">
+                              Arquivo salvo: {formField.value}
                             </p>
                           )}
                         </div>
@@ -228,42 +395,33 @@ export default function DependentsPage() {
                     )}
                   />
                 </div>
-
-                {index > 0 && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="mt-4 text-red-500 hover:text-red-600 whitespace-nowrap min-w-[180px]"
-                    onClick={() => remove(index)}
-                  >
-                    Remover Dependente {index + 1}
-                  </Button>
-                )}
               </div>
             ))}
 
-            <div className="flex justify-center mt-6">
-              <Button
-                type="button"
-                variant="outline"
-                className="whitespace-nowrap min-w-[220px]"
-                onClick={() =>
-                  append({
-                    nome: "",
-                    parentesco: "",
-                    dataNascimento: new Date(),
-                    documento: undefined,
-                    idade: 0,
-                  })
-                }
-              >
-                <PlusIcon className="mr-2 h-4 w-4" />
-                Adicionar novo Dependente
-              </Button>
-            </div>
+            {fields.length > 0 && (
+              <div className="flex justify-center mt-6">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={addEmptyDependent}
+                >
+                  <PlusIcon className="mr-2 h-4 w-4" />
+                  Adicionar outro Dependente
+                </Button>
+              </div>
+            )}
           </div>
 
-          <FormActionsButton />
+          <FormActionsButton
+            onCancel={handleCancel}
+            disabled={isSubmitting}
+            onPrevious={handlePreviousPage}
+            onNext={handleNextPage}
+            previousLabel="Voltar"
+            nextLabel={isSubmitting ? "Enviando..." : "Próximo"}
+            cancelLabel="Limpar"
+            onSaveDraft={onSaveDraft}
+          />
         </form>
       </Form>
     </PageLayout>

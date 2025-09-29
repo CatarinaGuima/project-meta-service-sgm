@@ -134,7 +134,7 @@ export default function ContactRegistration() {
       localStorage.setItem("contact-data", JSON.stringify(data));
       
       // Navega para a próxima página
-      router.push("/pessoal/cadastro/documentos"); 
+      router.push("/pessoal/cadastro/dadosContratuais"); 
     } catch (error) {
       console.error("Erro ao enviar dados:", error);
       // Você pode adicionar tratamento de erro aqui (ex: toast de erro)
@@ -166,7 +166,7 @@ export default function ContactRegistration() {
   const handlePreviousPage = () => {
     // Salva o rascunho antes de navegar
     onSaveDraft();
-    router.push("/pessoal/cadastro/contatos"); // Volta para página anterior 
+    router.push("/pessoal/cadastro/endereco"); // Volta para página anterior 
   };
 
   // Função para cancelar
